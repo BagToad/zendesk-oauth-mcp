@@ -71,6 +71,32 @@ Add the server to your MCP client config. Replace the subdomain and cookie value
 
 Restart your MCP client (e.g. relaunch Copilot CLI) to pick up the new server. You should now have access to `search_tickets`, `get_ticket`, `get_ticket_comments`, and `list_tickets` tools.
 
+### 5. Test the connection
+
+Verify your setup is working by asking Copilot to query your Zendesk instance:
+
+```
+show me all open tickets assigned to $USER
+```
+
+If everything is configured correctly you should see a list of your open tickets. If you get an authentication error, double-check your cookie and subdomain values.
+
+### 6. Install the Zendesk skill
+
+Copy the included [skill file](.github/skills/zendesk-mcp/SKILL.md) to your personal skills directory so Copilot knows how to use the Zendesk tools across all your projects:
+
+```bash
+mkdir -p ~/.copilot/skills/zendesk-mcp
+cp .github/skills/zendesk-mcp/SKILL.md ~/.copilot/skills/zendesk-mcp/
+```
+
+> If you don't have a local clone of this repo, you can download the file directly:
+> ```bash
+> mkdir -p ~/.copilot/skills/zendesk-mcp
+> gh api repos/BagToad/zendesk-oauth-mcp/contents/.github/skills/zendesk-mcp/SKILL.md \
+>   --jq '.content' | base64 -d > ~/.copilot/skills/zendesk-mcp/SKILL.md
+> ```
+
 ## Authentication
 
 This server authenticates to Zendesk using your browser's session cookie. This means it has the same permissions as your logged-in Zendesk account with no admin setup required.
