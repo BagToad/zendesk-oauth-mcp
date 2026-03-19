@@ -64,21 +64,7 @@ The server will automatically extract your Zendesk session cookie from your brow
 
 > If the binary isn't on your `PATH`, use the full path to the binary instead (e.g. `/Users/you/.local/bin/zendesk-oauth-mcp`).
 
-### 3. Restart your MCP client
-
-Restart your MCP client (e.g. relaunch Copilot CLI) to pick up the new server. You should now have access to `search_tickets`, `get_ticket`, `get_ticket_comments`, and `list_tickets` tools.
-
-### 4. Test the connection
-
-Verify your setup is working by asking Copilot to query your Zendesk instance:
-
-```
-show me all open tickets assigned to $USER
-```
-
-If everything is configured correctly you should see a list of your open tickets. If you get an authentication error, double-check your cookie and subdomain values.
-
-### 5. Install the Zendesk skill
+### 3. Install the Zendesk skill
 
 Copy the included [skill file](.github/skills/zendesk-mcp/SKILL.md) to your personal skills directory so Copilot knows how to use the Zendesk tools across all your projects:
 
@@ -93,6 +79,36 @@ cp .github/skills/zendesk-mcp/SKILL.md ~/.copilot/skills/zendesk-mcp/
 > gh api repos/BagToad/zendesk-oauth-mcp/contents/.github/skills/zendesk-mcp/SKILL.md \
 >   --jq '.content' | base64 -d > ~/.copilot/skills/zendesk-mcp/SKILL.md
 > ```
+
+### 4. Install the Zendesk Investigator agent
+
+Copy the included [agent file](.github/agents/zendesk-investigator.agent.md) to your personal agents directory so Copilot can perform end-to-end ticket investigations:
+
+```bash
+mkdir -p ~/.copilot/agents
+cp .github/agents/zendesk-investigator.agent.md ~/.copilot/agents/
+```
+
+> If you don't have a local clone of this repo, you can download the file directly:
+> ```bash
+> mkdir -p ~/.copilot/agents
+> gh api repos/BagToad/zendesk-oauth-mcp/contents/.github/agents/zendesk-investigator.agent.md \
+>   --jq '.content' | base64 -d > ~/.copilot/agents/zendesk-investigator.agent.md
+> ```
+
+### 5. Restart your MCP client
+
+Restart your MCP client (e.g. relaunch Copilot CLI) to pick up the new server, skill, and agent. You should now have access to `search_tickets`, `get_ticket`, `get_ticket_comments`, and `list_tickets` tools.
+
+### 6. Test the connection
+
+Verify your setup is working by asking Copilot to query your Zendesk instance:
+
+```
+show me all open tickets assigned to $USER
+```
+
+If everything is configured correctly you should see a list of your open tickets. If you get an authentication error, double-check your cookie and subdomain values.
 
 ## Updates
 
