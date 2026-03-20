@@ -29,10 +29,13 @@ mv zendesk-oauth-mcp ~/.local/bin/
 
 > **Ensure `~/.local/bin` is on your PATH.** If it isn't, add it to your shell profile:
 > ```bash
-> # Add to ~/.bashrc, ~/.zshrc, or equivalent
+> # bash (~/.bashrc) or zsh (~/.zshrc)
 > export PATH="$HOME/.local/bin:$PATH"
+>
+> # fish (~/.config/fish/config.fish)
+> fish_add_path ~/.local/bin
 > ```
-> Then restart your shell or run `source ~/.bashrc` (or `~/.zshrc`).
+> Then restart your shell or run `source ~/.bashrc` / `source ~/.zshrc` / restart fish.
 
 > **Note (macOS):** If macOS blocks the binary, remove the quarantine attribute:
 > ```bash
