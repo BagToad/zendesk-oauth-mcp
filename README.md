@@ -168,6 +168,7 @@ When `ZENDESK_COOKIE` is not set, the server automatically extracts cookies from
 | Firefox | ✅ | ✅ |
 | Safari | ✅ | - |
 | Chrome | ✅ | ✅ |
+| Edge | ✅ | ✅ |
 
 The server searches browsers in the order listed above. Once it finds valid Zendesk cookies, it stops searching. This means **Zen and Firefox are checked first** and don't require any password prompts.
 

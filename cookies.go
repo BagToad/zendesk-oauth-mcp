@@ -12,6 +12,7 @@ import (
 
 	"github.com/browserutils/kooky"
 	_ "github.com/browserutils/kooky/browser/chrome"
+	_ "github.com/browserutils/kooky/browser/edge"
 	firefoxkooky "github.com/browserutils/kooky/browser/firefox"
 	_ "github.com/browserutils/kooky/browser/safari"
 )
@@ -27,7 +28,7 @@ var (
 )
 
 // extractCookieFromBrowser searches installed browsers for Zendesk session cookies.
-// Supports Chrome, Firefox, Safari, and Zen (Firefox-based).
+// Supports Chrome, Edge, Firefox, Safari, and Zen (Firefox-based).
 // When multiple browsers have the same cookie, the one with the latest expiry wins.
 func extractCookieFromBrowser(subdomain string) (string, error) {
 	domain := subdomain + ".zendesk.com"
@@ -87,7 +88,7 @@ func extractCookieFromBrowser(subdomain string) (string, error) {
 	}
 
 	return "", fmt.Errorf(
-		"no Zendesk cookies found in any browser for %s - ensure you are logged into Zendesk in your browser (Zen, Firefox, Safari, or Chrome)",
+		"no Zendesk cookies found in any browser for %s - ensure you are logged into Zendesk in your browser (Zen, Firefox, Safari, Chrome, or Edge)",
 		domain,
 	)
 }
