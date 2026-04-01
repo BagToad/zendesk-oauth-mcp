@@ -22,6 +22,8 @@ func main() {
 		mcp.NewTool("search_tickets",
 			mcp.WithDescription("Search Zendesk tickets using Zendesk search syntax. Supports queries like 'status:open', 'priority:high', 'assignee:me', free text, tags, etc."),
 			mcp.WithString("query", mcp.Required(), mcp.Description("Zendesk search query (e.g. 'status:open billing issue')")),
+			mcp.WithString("created_after", mcp.Description("Filter to tickets created after this time. Preferred format: ISO 8601 in UTC (e.g. '2026-04-01T08:00:00Z'). Also accepts date-only (e.g. '2026-04-01'). All times are UTC — convert from local timezone before passing. If the user's timezone is ambiguous, ask for clarification.")),
+			mcp.WithString("updated_after", mcp.Description("Filter to tickets updated after this time. Preferred format: ISO 8601 in UTC (e.g. '2026-04-01T08:00:00Z'). Also accepts date-only (e.g. '2026-04-01'). All times are UTC — convert from local timezone before passing. If the user's timezone is ambiguous, ask for clarification.")),
 			mcp.WithNumber("page", mcp.Description("Page number for pagination")),
 			mcp.WithNumber("per_page", mcp.Description("Results per page (max 100)")),
 		),
@@ -79,6 +81,7 @@ func toSummaries(tickets []ZendeskTicket) []ticketSummary {
 			Subject:   t.Subject,
 			Status:    t.Status,
 			Priority:  t.Priority,
+			CreatedAt: t.CreatedAt,
 			UpdatedAt: t.UpdatedAt,
 			Tags:      t.Tags,
 		}
@@ -88,8 +91,20 @@ func toSummaries(tickets []ZendeskTicket) []ticketSummary {
 
 func handleSearchTickets(_ context.Context, req mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	query := req.GetString("query", "")
+	createdAfter := req.GetString("created_after", "")
+	updatedAfter := req.GetString("updated_after", "")
 	page := req.GetInt("page", 1)
 	perPage := req.GetInt("per_page", 25)
+
+	// Append time filters to the query using Zendesk's native search syntax.
+	// Zendesk accepts both date-only ("2026-04-01") and full ISO 8601
+	// ("2026-04-01T08:00:00Z"). All times are interpreted as UTC by Zendesk.
+	if createdAfter != "" {
+		query += " created>" + createdAfter
+	}
+	if updatedAfter != "" {
+		query += " updated>" + updatedAfter
+	}
 
 	result, err := searchTickets(query, page, perPage)
 	if err != nil {
@@ -175,6 +190,7 @@ type ticketSummary struct {
 	Subject   string   `json:"subject"`
 	Status    string   `json:"status"`
 	Priority  *string  `json:"priority"`
+	CreatedAt string   `json:"created_at"`
 	UpdatedAt string   `json:"updated_at"`
 	Tags      []string `json:"tags"`
 }
