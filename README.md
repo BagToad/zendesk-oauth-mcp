@@ -203,6 +203,30 @@ For detailed tool documentation, parameters, search syntax, and agent usage tips
 
 This repo also includes a [Zendesk Ticket Investigator agent](.github/agents/zendesk-investigator.agent.md) that can perform end-to-end ticket investigations - gathering context, searching for related tickets, tracing root causes, and producing structured summaries. If you have the [`gh-slack`](https://github.com/rneatherway/gh-slack) extension installed, the agent can also search Slack for internal discussions related to a ticket.
 
+### Time-based filtering
+
+The `search_tickets` tool supports optional `created_after` and `updated_after` parameters for scoping results to a time window. All times are **UTC**.
+
+| Parameter | Format | Example |
+|---|---|---|
+| `created_after` | ISO 8601 (preferred) | `2026-04-01T08:00:00Z` |
+| `created_after` | Date only | `2026-04-01` |
+| `updated_after` | ISO 8601 (preferred) | `2026-04-01T08:00:00Z` |
+| `updated_after` | Date only | `2026-04-01` |
+
+**Examples:**
+
+```
+# Find new urgent tickets created in the last 2 hours
+search_tickets(query="priority:urgent", created_after="2026-04-01T06:00:00Z")
+
+# Find Actions tickets updated today
+search_tickets(query="cat_github_actions", updated_after="2026-04-01")
+
+# Combine with other filters
+search_tickets(query="status:open priority:high", created_after="2026-03-31T00:00:00Z")
+```
+
 ### Common errors
 
 | Error | Cause | Fix |
