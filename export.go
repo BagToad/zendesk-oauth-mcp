@@ -3,16 +3,21 @@ package main
 import (
 	"encoding/base64"
 	"fmt"
+	"net/url"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
-	"golang.org/x/net/html"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/converter"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/base"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/commonmark"
+	"github.com/JohannesKaufmann/html-to-markdown/v2/plugin/table"
 )
 
 var nonAlphanumDot = regexp.MustCompile(`[^a-z0-9.]+`)
+var reEmptyAnchor = regexp.MustCompile(`\[]\(#[^)]*\)`)
 
 // sanitizeFilename lowercases, replaces spaces/special chars with hyphens,
 // and collapses runs of hyphens. "Image (3).PNG" → "image-3.png"
@@ -106,9 +111,23 @@ func renderComment(comment ZendeskComment, users map[int]ZendeskUser) string {
 		body = htmlBodyToMarkdown(comment.HTMLBody)
 	}
 
+	// Strip empty anchor links from headings (e.g. "[](#anchor-id)")
+	// These are artifacts from Zendesk's HTML heading markup.
+	body = reEmptyAnchor.ReplaceAllString(body, "")
+
 	for _, a := range comment.Attachments {
 		if a.ContentURL != "" && a.FileName != "" {
-			body = strings.ReplaceAll(body, a.ContentURL, fmt.Sprintf("./attachments/%s", sanitizeFilename(a.FileName)))
+			sanitized := sanitizeFilename(a.FileName)
+			replacement := fmt.Sprintf("./attachments/%s", sanitized)
+			// Replace both the raw URL and any URL-encoded variant
+			body = strings.ReplaceAll(body, a.ContentURL, replacement)
+			if encoded := url.PathEscape(a.FileName); encoded != a.FileName {
+				body = strings.ReplaceAll(body, encoded, sanitized)
+			}
+			// Also try matching the URL by its unique token path
+			if token := extractZendeskToken(a.ContentURL); token != "" {
+				body = replaceURLContaining(body, token, replacement)
+			}
 		}
 	}
 
@@ -278,264 +297,47 @@ func getTicketUpdatesSince(ticketID int, since string, includeInternal bool) (ma
 	return result, nil
 }
 
-// htmlBodyToMarkdown converts Zendesk's html_body to markdown.
-// The plain text body strips table formatting, so we parse the HTML to
-// recover <table> elements as proper markdown tables while leaving the
-// rest of the content as-is (Zendesk already stores most text as markdown).
+// htmlBodyToMarkdown converts Zendesk's html_body to markdown using the
+// html-to-markdown package. This handles tables, code blocks, links, images,
+// lists, formatting, and all standard HTML elements.
 func htmlBodyToMarkdown(htmlStr string) string {
-	doc, err := html.Parse(strings.NewReader(htmlStr))
+	conv := converter.NewConverter(
+		converter.WithPlugins(
+			base.NewBasePlugin(),
+			commonmark.NewCommonmarkPlugin(
+				commonmark.WithCodeBlockFence("```"),
+			),
+			table.NewTablePlugin(),
+		),
+	)
+
+	markdown, err := conv.ConvertString(htmlStr)
 	if err != nil {
 		return htmlStr
 	}
-	var sb strings.Builder
-	walkNode(&sb, doc)
-	result := strings.TrimSpace(sb.String())
-	result = strings.ReplaceAll(result, "\u00A0", " ")
-	return convertIndentedCodeBlocks(result)
+
+	markdown = strings.ReplaceAll(markdown, "\u00A0", " ")
+	return strings.TrimSpace(markdown)
 }
 
-func walkNode(sb *strings.Builder, n *html.Node) {
-	switch {
-	case n.Type == html.ElementNode && n.Data == "table":
-		sb.WriteString("\n")
-		sb.WriteString(renderHTMLTable(n))
-		sb.WriteString("\n")
-		return
-	case n.Type == html.ElementNode && n.Data == "br":
-		sb.WriteString("\n")
-	case n.Type == html.ElementNode && n.Data == "p":
-		sb.WriteString("\n")
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walkNode(sb, c)
+// extractZendeskToken pulls the unique token path segment from a Zendesk
+// attachment URL (e.g. "oLIuykejCvC12RY61XoTcxX6I" from the CDN URL).
+func extractZendeskToken(contentURL string) string {
+	// URL format: https://...zendesk.com/attachments/token/TOKEN_HERE/...
+	if i := strings.Index(contentURL, "/token/"); i >= 0 {
+		rest := contentURL[i+7:]
+		if j := strings.Index(rest, "/"); j >= 0 {
+			return rest[:j]
 		}
-		sb.WriteString("\n")
-		return
-	case n.Type == html.ElementNode && n.Data == "a":
-		href := getAttr(n, "href")
-		text := collectText(n)
-		if href != "" && text != "" {
-			sb.WriteString(fmt.Sprintf("[%s](%s)", text, href))
-		} else if text != "" {
-			sb.WriteString(text)
-		}
-		return
-	case n.Type == html.ElementNode && n.Data == "img":
-		src := getAttr(n, "src")
-		alt := getAttr(n, "alt")
-		if src != "" {
-			sb.WriteString(fmt.Sprintf("![%s](%s)", alt, src))
-		}
-		return
-	case n.Type == html.ElementNode && n.Data == "code":
-		text := collectText(n)
-		sb.WriteString("`" + text + "`")
-		return
-	case n.Type == html.ElementNode && n.Data == "pre":
-		text := collectTextWithBreaks(n)
-		sb.WriteString("\n```\n" + text + "\n```\n")
-		return
-	case n.Type == html.ElementNode && n.Data == "strong" || n.Data == "b":
-		text := collectText(n)
-		sb.WriteString("**" + text + "**")
-		return
-	case n.Type == html.ElementNode && n.Data == "em" || n.Data == "i":
-		text := collectText(n)
-		sb.WriteString("_" + text + "_")
-		return
-	case n.Type == html.ElementNode && (n.Data == "h1" || n.Data == "h2" || n.Data == "h3" || n.Data == "h4"):
-		level := int(n.Data[1] - '0')
-		text := collectText(n)
-		sb.WriteString("\n" + strings.Repeat("#", level) + " " + text + "\n")
-		return
-	case n.Type == html.ElementNode && n.Data == "li":
-		sb.WriteString("- ")
-		for c := n.FirstChild; c != nil; c = c.NextSibling {
-			walkNode(sb, c)
-		}
-		sb.WriteString("\n")
-		return
-	case n.Type == html.ElementNode && n.Data == "blockquote":
-		text := collectText(n)
-		for _, line := range strings.Split(text, "\n") {
-			sb.WriteString("> " + line + "\n")
-		}
-		return
-	case n.Type == html.ElementNode && n.Data == "div":
-		// divs are just containers, walk children
-	case n.Type == html.TextNode:
-		sb.WriteString(n.Data)
-	}
-
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkNode(sb, c)
-	}
-}
-
-func renderHTMLTable(table *html.Node) string {
-	var rows [][]string
-	forEachElement(table, "tr", func(tr *html.Node) {
-		var cells []string
-		for c := tr.FirstChild; c != nil; c = c.NextSibling {
-			if c.Type == html.ElementNode && (c.Data == "td" || c.Data == "th") {
-				cells = append(cells, strings.TrimSpace(collectText(c)))
-			}
-		}
-		if len(cells) > 0 {
-			rows = append(rows, cells)
-		}
-	})
-
-	if len(rows) == 0 {
-		return ""
-	}
-
-	// Calculate column widths
-	numCols := 0
-	for _, row := range rows {
-		if len(row) > numCols {
-			numCols = len(row)
-		}
-	}
-	widths := make([]int, numCols)
-	for _, row := range rows {
-		for i, cell := range row {
-			if len(cell) > widths[i] {
-				widths[i] = len(cell)
-			}
-		}
-	}
-	// Minimum width of 3 for separator
-	for i := range widths {
-		if widths[i] < 3 {
-			widths[i] = 3
-		}
-	}
-
-	var sb strings.Builder
-	for ri, row := range rows {
-		sb.WriteString("|")
-		for ci := 0; ci < numCols; ci++ {
-			cell := ""
-			if ci < len(row) {
-				cell = row[ci]
-			}
-			sb.WriteString(fmt.Sprintf(" %-*s |", widths[ci], cell))
-		}
-		sb.WriteString("\n")
-
-		// Add separator after header row
-		if ri == 0 {
-			sb.WriteString("|")
-			for ci := 0; ci < numCols; ci++ {
-				sb.WriteString(" " + strings.Repeat("-", widths[ci]) + " |")
-			}
-			sb.WriteString("\n")
-		}
-	}
-	return sb.String()
-}
-
-func forEachElement(n *html.Node, tag string, fn func(*html.Node)) {
-	if n.Type == html.ElementNode && n.Data == tag {
-		fn(n)
-	}
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		forEachElement(c, tag, fn)
-	}
-}
-
-func collectText(n *html.Node) string {
-	if n.Type == html.TextNode {
-		return n.Data
-	}
-	var sb strings.Builder
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		sb.WriteString(collectText(c))
-	}
-	return sb.String()
-}
-
-// collectTextWithBreaks is like collectText but converts <br> tags to newlines.
-// Used inside <pre> blocks where <br> represents actual line breaks.
-func collectTextWithBreaks(n *html.Node) string {
-	if n.Type == html.TextNode {
-		return n.Data
-	}
-	if n.Type == html.ElementNode && n.Data == "br" {
-		return "\n"
-	}
-	var sb strings.Builder
-	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		sb.WriteString(collectTextWithBreaks(c))
-	}
-	return sb.String()
-}
-
-func getAttr(n *html.Node, key string) string {
-	for _, a := range n.Attr {
-		if a.Key == key {
-			return a.Val
-		}
+		return rest
 	}
 	return ""
 }
 
-// convertIndentedCodeBlocks replaces 4-space indented code blocks with
-// fenced (```) code blocks for readability.
-func convertIndentedCodeBlocks(text string) string {
-	lines := strings.Split(text, "\n")
-	var result []string
-	inBlock := false
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		isIndented := strings.HasPrefix(line, "    ") && strings.TrimSpace(line) != ""
-		isEmpty := strings.TrimSpace(line) == ""
-
-		if isIndented && !inBlock {
-			// Check that the previous line is blank or start of text
-			if len(result) == 0 || strings.TrimSpace(result[len(result)-1]) == "" {
-				inBlock = true
-				result = append(result, "```")
-				result = append(result, line[4:])
-				continue
-			}
-		}
-
-		if inBlock {
-			if isIndented {
-				result = append(result, line[4:])
-				continue
-			}
-			// Blank lines within an indented block are kept if the next
-			// non-blank line is still indented
-			if isEmpty {
-				next := peekNextNonEmpty(lines, i+1)
-				if strings.HasPrefix(next, "    ") {
-					result = append(result, "")
-					continue
-				}
-			}
-			// End of indented block
-			inBlock = false
-			result = append(result, "```")
-		}
-
-		result = append(result, line)
-	}
-
-	if inBlock {
-		result = append(result, "```")
-	}
-
-	return strings.Join(result, "\n")
-}
-
-func peekNextNonEmpty(lines []string, from int) string {
-	for i := from; i < len(lines); i++ {
-		if strings.TrimSpace(lines[i]) != "" {
-			return lines[i]
-		}
-	}
-	return ""
+// replaceURLContaining finds markdown links whose URL contains the given
+// substring and replaces the entire URL with the replacement.
+func replaceURLContaining(body, urlSubstring, replacement string) string {
+	// Match markdown link/image patterns: [text](url) or ![alt](url)
+	re := regexp.MustCompile(`(!?\[[^\]]*\])\(([^)]*` + regexp.QuoteMeta(urlSubstring) + `[^)]*)\)`)
+	return re.ReplaceAllString(body, "${1}("+replacement+")")
 }
