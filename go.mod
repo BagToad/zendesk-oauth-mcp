@@ -3,11 +3,13 @@ module github.com/BagToad/zendesk-oauth-mcp
 go 1.25.5
 
 require (
+	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.0
 	github.com/browserutils/kooky v0.2.8
 	github.com/mark3labs/mcp-go v0.45.0
 )
 
 require (
+	github.com/JohannesKaufmann/dom v0.2.0 // indirect
 	github.com/bahlo/generic-list-go v0.2.0 // indirect
 	github.com/browserutils/ese v0.0.0-20260314233042-37b6a03a93ce // indirect
 	github.com/buger/jsonparser v1.1.2 // indirect

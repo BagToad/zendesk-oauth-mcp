@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"os"
 	"strconv"
+	"strings"
 )
 
 var (
@@ -104,20 +105,21 @@ func zendeskFetch(path string, params map[string]string) ([]byte, error) {
 // Zendesk API types
 
 type ZendeskTicket struct {
-	ID           int            `json:"id"`
-	Subject      string         `json:"subject"`
-	Description  string         `json:"description"`
-	Status       string         `json:"status"`
-	Priority     *string        `json:"priority"`
-	Type         *string        `json:"type"`
-	CreatedAt    string         `json:"created_at"`
-	UpdatedAt    string         `json:"updated_at"`
-	RequesterID  int            `json:"requester_id"`
-	AssigneeID   *int           `json:"assignee_id"`
-	GroupID      *int           `json:"group_id"`
-	Tags         []string       `json:"tags"`
-	CustomFields []CustomField  `json:"custom_fields"`
-	URL          string         `json:"url"`
+	ID             int           `json:"id"`
+	Subject        string        `json:"subject"`
+	Description    string        `json:"description"`
+	Status         string        `json:"status"`
+	Priority       *string       `json:"priority"`
+	Type           *string       `json:"type"`
+	CreatedAt      string        `json:"created_at"`
+	UpdatedAt      string        `json:"updated_at"`
+	RequesterID    int           `json:"requester_id"`
+	AssigneeID     *int          `json:"assignee_id"`
+	OrganizationID *int          `json:"organization_id"`
+	GroupID        *int          `json:"group_id"`
+	Tags           []string      `json:"tags"`
+	CustomFields   []CustomField `json:"custom_fields"`
+	URL            string        `json:"url"`
 }
 
 type CustomField struct {
@@ -128,6 +130,7 @@ type CustomField struct {
 type ZendeskComment struct {
 	ID          int          `json:"id"`
 	Body        string       `json:"body"`
+	HTMLBody    string       `json:"html_body"`
 	AuthorID    int          `json:"author_id"`
 	CreatedAt   string       `json:"created_at"`
 	Public      bool         `json:"public"`
@@ -238,4 +241,118 @@ func listTickets(status string, page, perPage int) (*ticketListResult, error) {
 	}
 
 	return &ticketListResult{Tickets: result.Tickets, Count: result.Count}, nil
+}
+
+// User and organization types
+
+type ZendeskUser struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+	Role string `json:"role"`
+}
+
+type usersResult struct {
+	Users []ZendeskUser `json:"users"`
+}
+
+type ZendeskOrganization struct {
+	ID   int    `json:"id"`
+	Name string `json:"name"`
+}
+
+type organizationResult struct {
+	Organization ZendeskOrganization `json:"organization"`
+}
+
+// getUsers fetches multiple users by ID in a single batch API call.
+// Zendesk's /users/show_many.json endpoint accepts up to 100 IDs.
+func getUsers(ids []int) (map[int]ZendeskUser, error) {
+	if len(ids) == 0 {
+		return map[int]ZendeskUser{}, nil
+	}
+
+	seen := make(map[int]bool)
+	var unique []string
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			unique = append(unique, strconv.Itoa(id))
+		}
+	}
+
+	data, err := zendeskFetch("/users/show_many.json", map[string]string{
+		"ids": strings.Join(unique, ","),
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result usersResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parsing users response: %w", err)
+	}
+
+	userMap := make(map[int]ZendeskUser, len(result.Users))
+	for _, u := range result.Users {
+		userMap[u.ID] = u
+	}
+	return userMap, nil
+}
+
+func getOrganization(orgID int) (*ZendeskOrganization, error) {
+	data, err := zendeskFetch(fmt.Sprintf("/organizations/%d.json", orgID), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	var result organizationResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, fmt.Errorf("parsing org response: %w", err)
+	}
+
+	return &result.Organization, nil
+}
+
+// getAllTicketComments fetches every comment on a ticket, paginating automatically.
+func getAllTicketComments(ticketID int) ([]ZendeskComment, error) {
+	var all []ZendeskComment
+	page := 1
+	for {
+		result, err := getTicketComments(ticketID, page, 100)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, result.Comments...)
+		if len(all) >= result.Count {
+			break
+		}
+		page++
+	}
+	return all, nil
+}
+
+// downloadAttachment fetches attachment bytes from a Zendesk CDN URL.
+func downloadAttachment(contentURL string) ([]byte, error) {
+	cookie, err := getCookie()
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest("GET", contentURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("creating attachment request: %w", err)
+	}
+	req.Header.Set("Cookie", cookie)
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("downloading attachment: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf("attachment download error %d: %s", resp.StatusCode, resp.Status)
+	}
+
+	return io.ReadAll(resp.Body)
 }
