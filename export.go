@@ -36,38 +36,17 @@ type ExportAttachment struct {
 }
 
 // isBotComment returns true if the comment should be filtered out as bot-generated.
-// Checks the ZENDESK_BOT_IDS env var first, then falls back to content-based heuristics.
-func isBotComment(comment ZendeskComment, author ZendeskUser) bool {
-	if botIDs := os.Getenv("ZENDESK_BOT_IDS"); botIDs != "" {
-		for _, idStr := range strings.Split(botIDs, ",") {
-			if id, err := strconv.Atoi(strings.TrimSpace(idStr)); err == nil && id == comment.AuthorID {
-				return true
-			}
-		}
+// Uses the ZENDESK_BOT_IDS env var (comma-separated author IDs) to identify bots.
+func isBotComment(comment ZendeskComment) bool {
+	botIDs := os.Getenv("ZENDESK_BOT_IDS")
+	if botIDs == "" {
+		return false
 	}
-
-	nameLower := strings.ToLower(author.Name)
-	for _, pattern := range []string{"answer bot", "zendesk", "ticket bot"} {
-		if strings.Contains(nameLower, pattern) {
+	for _, idStr := range strings.Split(botIDs, ",") {
+		if id, err := strconv.Atoi(strings.TrimSpace(idStr)); err == nil && id == comment.AuthorID {
 			return true
 		}
 	}
-
-	prefix := comment.Body
-	if len(prefix) > 300 {
-		prefix = prefix[:300]
-	}
-	for _, pattern := range []string{
-		"**AI Suggested Solution",
-		"**User Lookup:**",
-		"⭐️ : Premium:",
-		"I see the category was updated",
-	} {
-		if strings.Contains(prefix, pattern) {
-			return true
-		}
-	}
-
 	return false
 }
 
@@ -159,10 +138,10 @@ func processAttachments(comments []ZendeskComment) []ExportAttachment {
 }
 
 // filterComments removes bot comments and optionally internal notes.
-func filterComments(comments []ZendeskComment, users map[int]ZendeskUser, includeInternal bool) []ZendeskComment {
+func filterComments(comments []ZendeskComment, includeInternal bool) []ZendeskComment {
 	var filtered []ZendeskComment
 	for _, c := range comments {
-		if isBotComment(c, users[c.AuthorID]) {
+		if isBotComment(c) {
 			continue
 		}
 		if !includeInternal && !c.Public {
@@ -207,7 +186,7 @@ func exportTicketMarkdown(ticketID int, includeInternal bool) (map[string]any, e
 		}
 	}
 
-	filtered := filterComments(comments, users, includeInternal)
+	filtered := filterComments(comments, includeInternal)
 	attachments := processAttachments(filtered)
 
 	var md strings.Builder
@@ -269,7 +248,7 @@ func getTicketUpdatesSince(ticketID int, since string, includeInternal bool) (ma
 		return nil, fmt.Errorf("resolving users: %w", err)
 	}
 
-	filtered := filterComments(newComments, users, includeInternal)
+	filtered := filterComments(newComments, includeInternal)
 	attachments := processAttachments(filtered)
 
 	var md strings.Builder
